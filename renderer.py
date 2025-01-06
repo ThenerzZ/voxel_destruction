@@ -12,14 +12,10 @@ import traceback
 class VoxelRenderer:
     def __init__(self):
         # Initialize basic properties first
-        self.max_instances = 16384  # Maximum number of instances to render at once
-        self.shader = None
-        self.vao = None
-        self.vbo = None
-        self.ebo = None
-        self.instance_vbo = None
+        self.max_instances = 32768
+        self.instance_buffer_size = self.max_instances * 6 * 4  # 6 floats per instance, 4 bytes per float
         
-        # Face direction vectors for culling checks
+        # Initialize other properties
         self.face_directions = [
             ( 0,  0,  1),  # Front  (+Z)
             ( 0,  0, -1),  # Back   (-Z)
@@ -29,14 +25,110 @@ class VoxelRenderer:
             (-1,  0,  0),  # Left   (-X)
         ]
         
-        # Initialize lighting and atmosphere systems
+        # Initialize systems
         self.lighting_system = LightingSystem()
         self.atmosphere_system = AtmosphereSystem()
         
-        # Setup OpenGL resources
+        # Setup shaders first
         self.setup_shaders()
+        
+        # Create and bind VAO
+        self.vao = glGenVertexArrays(1)
+        glBindVertexArray(self.vao)
+        
+        # Create vertex buffer for cube geometry
+        self.vbo = glGenBuffers(1)
+        glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
+        
+        # Define cube vertices with position, normal, and UV
+        vertices = np.array([
+            # Front face
+            -0.5, -0.5,  0.5,   0.0,  0.0,  1.0,   0.0, 0.0,  # Bottom-left
+             0.5, -0.5,  0.5,   0.0,  0.0,  1.0,   1.0, 0.0,  # Bottom-right
+             0.5,  0.5,  0.5,   0.0,  0.0,  1.0,   1.0, 1.0,  # Top-right
+            -0.5,  0.5,  0.5,   0.0,  0.0,  1.0,   0.0, 1.0,  # Top-left
+            
+            # Back face
+            -0.5, -0.5, -0.5,   0.0,  0.0, -1.0,   1.0, 0.0,
+             0.5, -0.5, -0.5,   0.0,  0.0, -1.0,   0.0, 0.0,
+             0.5,  0.5, -0.5,   0.0,  0.0, -1.0,   0.0, 1.0,
+            -0.5,  0.5, -0.5,   0.0,  0.0, -1.0,   1.0, 1.0,
+            
+            # Top face
+            -0.5,  0.5, -0.5,   0.0,  1.0,  0.0,   0.0, 1.0,
+             0.5,  0.5, -0.5,   0.0,  1.0,  0.0,   1.0, 1.0,
+             0.5,  0.5,  0.5,   0.0,  1.0,  0.0,   1.0, 0.0,
+            -0.5,  0.5,  0.5,   0.0,  1.0,  0.0,   0.0, 0.0,
+            
+            # Bottom face
+            -0.5, -0.5, -0.5,   0.0, -1.0,  0.0,   0.0, 0.0,
+             0.5, -0.5, -0.5,   0.0, -1.0,  0.0,   1.0, 0.0,
+             0.5, -0.5,  0.5,   0.0, -1.0,  0.0,   1.0, 1.0,
+            -0.5, -0.5,  0.5,   0.0, -1.0,  0.0,   0.0, 1.0,
+            
+            # Right face
+             0.5, -0.5, -0.5,   1.0,  0.0,  0.0,   1.0, 0.0,
+             0.5,  0.5, -0.5,   1.0,  0.0,  0.0,   1.0, 1.0,
+             0.5,  0.5,  0.5,   1.0,  0.0,  0.0,   0.0, 1.0,
+             0.5, -0.5,  0.5,   1.0,  0.0,  0.0,   0.0, 0.0,
+            
+            # Left face
+            -0.5, -0.5, -0.5,  -1.0,  0.0,  0.0,   0.0, 0.0,
+            -0.5,  0.5, -0.5,  -1.0,  0.0,  0.0,   0.0, 1.0,
+            -0.5,  0.5,  0.5,  -1.0,  0.0,  0.0,   1.0, 1.0,
+            -0.5, -0.5,  0.5,  -1.0,  0.0,  0.0,   1.0, 0.0,
+        ], dtype=np.float32)
+        
+        # Upload vertex data
+        glBufferData(GL_ARRAY_BUFFER, vertices.nbytes, vertices, GL_STATIC_DRAW)
+        
+        # Set up vertex attributes for cube geometry
+        glEnableVertexAttribArray(0)  # position
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 32, ctypes.c_void_p(0))
+        
+        glEnableVertexAttribArray(1)  # normal
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 32, ctypes.c_void_p(12))
+        
+        glEnableVertexAttribArray(2)  # uv
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, ctypes.c_void_p(24))
+        
+        # Create element buffer for cube indices
+        self.ebo = glGenBuffers(1)
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.ebo)
+        
+        # Define cube indices
+        indices = np.array([
+            0,  1,  2,  2,  3,  0,  # Front
+            4,  5,  6,  6,  7,  4,  # Back
+            8,  9,  10, 10, 11, 8,  # Top
+            12, 13, 14, 14, 15, 12, # Bottom
+            16, 17, 18, 18, 19, 16, # Right
+            20, 21, 22, 22, 23, 20  # Left
+        ], dtype=np.uint32)
+        
+        # Upload index data
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, GL_STATIC_DRAW)
+        
+        # Create and initialize instance buffer
+        self.instance_vbo = glGenBuffers(1)
+        glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
+        glBufferData(GL_ARRAY_BUFFER, self.instance_buffer_size, None, GL_DYNAMIC_DRAW)
+        
+        # Set up instance attributes
+        glEnableVertexAttribArray(3)  # instance position
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(0))
+        glVertexAttribDivisor(3, 1)
+        
+        glEnableVertexAttribArray(4)  # instance color
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 24, ctypes.c_void_p(12))
+        glVertexAttribDivisor(4, 1)
+        
+        # Unbind buffers
+        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        glBindVertexArray(0)
+        
+        # Setup matrices
         self.setup_matrices()
-        self.setup_cube()
         
         # Material colors
         self.material_colors = {
@@ -54,24 +146,49 @@ class VoxelRenderer:
             0.6,    # Heavily damaged
         ]
         
+        # Face visibility lookup tables
+        self.face_masks = {
+            'top': np.array([0, 1, 0]),     # +Y
+            'bottom': np.array([0, -1, 0]),  # -Y
+            'front': np.array([0, 0, 1]),    # +Z
+            'back': np.array([0, 0, -1]),    # -Z
+            'right': np.array([1, 0, 0]),    # +X
+            'left': np.array([-1, 0, 0]),    # -X
+        }
+        
+        # Lookup table for face indices
+        self.face_indices = {
+            'top': 0,
+            'bottom': 1,
+            'front': 2,
+            'back': 3,
+            'right': 4,
+            'left': 5
+        }
+        
+        # Occlusion rules for different materials
+        self.occlusion_rules = {
+            MaterialType.AIR: lambda x: True,  # Air never occludes
+            MaterialType.GLASS: lambda x: False,  # Glass doesn't occlude same material
+            MaterialType.CONCRETE: lambda x: True,  # Concrete always occludes
+            MaterialType.WOOD: lambda x: True,  # Wood always occludes
+            MaterialType.METAL: lambda x: True,  # Metal always occludes
+        }
+        
     def should_render_face(self, world, x, y, z, dx, dy, dz):
-        """Check if a face should be rendered based on adjacent voxels"""
-        # Check if the adjacent block position is valid
-        adj_x = x + dx
-        adj_y = y + dy
-        adj_z = z + dz
+        """Determine if a face should be rendered based on neighbor voxels"""
+        # Check if neighbor position is within world bounds
+        nx, ny, nz = x + dx, y + dy, z + dz
+        if not (0 <= nx < world.width and 0 <= ny < world.height and 0 <= nz < world.depth):
+            return True  # Always render faces at world boundaries
+            
+        # Get neighbor voxel
+        neighbor = world.get_voxel_data(nx, ny, nz)
         
-        # If adjacent position is outside world bounds, always render the face
-        if not (0 <= adj_x < world.width and 
-                0 <= adj_y < world.height and 
-                0 <= adj_z < world.depth):
-            return True
-        
-        # Get adjacent voxel data
-        adj_voxel = world.get_voxel_data(adj_x, adj_y, adj_z)
-        
-        # Render face if adjacent block is air or doesn't exist
-        return adj_voxel is None or adj_voxel.material_type == MaterialType.AIR
+        # Render face if neighbor is air or transparent
+        return (neighbor is None or 
+                neighbor.material_type == MaterialType.AIR or 
+                neighbor.material_type == MaterialType.GLASS)
         
     def setup_shaders(self):
         print("\nCompiling shaders...")
@@ -159,107 +276,6 @@ class VoxelRenderer:
             dtype=np.float32
         )
         
-    def setup_cube(self):
-        # Define vertices for a unit cube (using full 1.0 size)
-        vertices = np.array([
-            # Front face (+Z)
-            -0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 0.0,  # Full size cube
-             0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 0.0,  # for no gaps
-             0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 1.0,
-            -0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 1.0,
-
-            # Back face (-Z)
-            -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,
-             0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
-             0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,
-            -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
-
-            # Top face (+Y)
-            -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0,
-             0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 1.0,
-             0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
-            -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 0.0,
-
-            # Bottom face (-Y)
-            -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 0.0,
-             0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
-             0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 1.0,
-            -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
-
-            # Right face (+X)
-             0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
-             0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 1.0,
-             0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
-             0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 0.0,
-
-            # Left face (-X)
-            -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 0.0,
-            -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
-            -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 1.0,
-            -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
-        ], dtype=np.float32)
-
-        # Define indices for all faces
-        indices = np.array([
-            0,  1,  2,    2,  3,  0,   # Front
-            4,  5,  6,    6,  7,  4,   # Back
-            8,  9,  10,   10, 11, 8,   # Top
-            12, 13, 14,   14, 15, 12,  # Bottom
-            16, 17, 18,   18, 19, 16,  # Right
-            20, 21, 22,   22, 23, 20   # Left
-        ], dtype=np.uint32)
-
-        # Create and bind VAO
-        self.vao = glGenVertexArrays(1)
-        glBindVertexArray(self.vao)
-
-        # Create and bind VBO for cube vertices
-        self.vbo = glGenBuffers(1)
-        glBindBuffer(GL_ARRAY_BUFFER, self.vbo)
-        glBufferData(GL_ARRAY_BUFFER, vertices.nbytes, vertices, GL_STATIC_DRAW)
-
-        # Create and bind EBO
-        self.ebo = glGenBuffers(1)
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.ebo)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, GL_STATIC_DRAW)
-
-        # Set up vertex attributes
-        # Position attribute
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 32, ctypes.c_void_p(0))
-        glEnableVertexAttribArray(0)
-
-        # Normal attribute
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 32, ctypes.c_void_p(12))
-        glEnableVertexAttribArray(1)
-
-        # Texture coordinate attribute
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 32, ctypes.c_void_p(24))
-        glEnableVertexAttribArray(2)
-
-        # Create and set up instance buffer
-        self.instance_vbo = glGenBuffers(1)
-        glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
-        
-        # Each instance needs: position (3), color (3)
-        instance_stride = 6 * 4  # 6 floats * 4 bytes
-        buffer_size = self.max_instances * instance_stride
-        glBufferData(GL_ARRAY_BUFFER, buffer_size, None, GL_DYNAMIC_DRAW)
-        
-        # Instance position attribute (location = 3)
-        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, instance_stride, ctypes.c_void_p(0))
-        glEnableVertexAttribArray(3)
-        glVertexAttribDivisor(3, 1)
-        
-        # Instance color attribute (location = 4)
-        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, instance_stride, ctypes.c_void_p(12))
-        glEnableVertexAttribArray(4)
-        glVertexAttribDivisor(4, 1)
-        
-        # Cleanup
-        glBindVertexArray(0)
-        glBindBuffer(GL_ARRAY_BUFFER, 0)
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0)
-
     def update(self, delta_time):
         """Update lighting and atmosphere systems"""
         self.lighting_system.update(delta_time)
@@ -308,12 +324,14 @@ class VoxelRenderer:
         try:
             glUseProgram(self.shader)
             
-            # Enable depth testing
+            # Enable depth testing and face culling
             glEnable(GL_DEPTH_TEST)
-            glDepthFunc(GL_LESS)
+            glDepthFunc(GL_LEQUAL)  # Changed from GL_LESS to handle coplanar faces better
             
-            # Disable face culling for now to see all faces
-            glDisable(GL_CULL_FACE)
+            # Only cull back faces when they're not visible
+            glEnable(GL_CULL_FACE)
+            glCullFace(GL_BACK)
+            glFrontFace(GL_CCW)  # Counter-clockwise winding
             
             # Enable blending for transparent materials
             glEnable(GL_BLEND)
@@ -325,11 +343,11 @@ class VoxelRenderer:
             # Render static world voxels
             self._render_static_voxels(world)
             
-            # Render falling chunks
-            self._render_chunks(world)
-            
-            # Render fragments
-            self._render_fragments(world)
+            # Only render physics objects if they exist
+            if world.physics.chunks:
+                self._render_chunks(world)
+            if world.physics.fragments:
+                self._render_fragments(world)
             
         except Exception as e:
             print(f"Error in render_world: {e}")
@@ -417,89 +435,131 @@ class VoxelRenderer:
             
         return True
         
+    def _check_face_visibility(self, world, chunk_cache, x, y, z, face_dir, current_material):
+        """
+        Sophisticated face visibility check using material-specific rules and chunk caching
+        Returns: (is_visible, should_merge)
+        """
+        nx, ny, nz = x + face_dir[0], y + face_dir[1], z + face_dir[2]
+        
+        # Check world bounds
+        if not (0 <= nx < world.width and 0 <= ny < world.height and 0 <= nz < world.depth):
+            return True, False  # Visible but can't merge at world edges
+        
+        # Get neighbor from cache if possible
+        chunk_x, chunk_z = nx // 16, nz // 16
+        cache_key = (chunk_x, chunk_z)
+        
+        if cache_key in chunk_cache:
+            neighbor = chunk_cache[cache_key].get((nx % 16, ny, nz % 16))
+        else:
+            # Cache miss - load chunk data
+            chunk_data = {}
+            cx_start = chunk_x * 16
+            cz_start = chunk_z * 16
+            for local_x in range(16):
+                for local_z in range(16):
+                    for local_y in range(world.height):
+                        world_x = cx_start + local_x
+                        world_z = cz_start + local_z
+                        if 0 <= world_x < world.width and 0 <= world_z < world.depth:
+                            voxel = world.get_voxel_data(world_x, local_y, world_z)
+                            if voxel and voxel.material_type != MaterialType.AIR:
+                                chunk_data[(local_x, local_y, local_z)] = voxel
+            chunk_cache[cache_key] = chunk_data
+            neighbor = chunk_data.get((nx % 16, ny, nz % 16))
+        
+        if not neighbor or neighbor.material_type == MaterialType.AIR:
+            return True, False  # Visible but can't merge with air
+            
+        # Check material-specific occlusion rules
+        if current_material == MaterialType.GLASS:
+            if neighbor.material_type == MaterialType.GLASS:
+                # Special case: only show glass-glass interfaces if damage states differ
+                return neighbor.damage_state != current_material.damage_state, True
+            return True, False  # Glass is visible next to non-glass
+            
+        # Apply material-specific occlusion rules
+        occludes = self.occlusion_rules[neighbor.material_type](current_material)
+        can_merge = (neighbor.material_type == current_material.material_type and 
+                    neighbor.damage_state == current_material.damage_state)
+        
+        return not occludes, can_merge
+
     def _render_static_voxels(self, world):
-        """Render the static (non-moving) voxels in the world"""
+        """Render the static (non-moving) voxels in the world with optimized face culling"""
         try:
-            # Pre-allocate arrays for better performance
-            max_batch_size = 16384  # Limit batch size for better performance
-            instance_data = np.zeros(max_batch_size * 6, dtype=np.float32)
+            instance_data = np.zeros(self.max_instances * 6, dtype=np.float32)
             instance_count = 0
             
-            # Calculate view frustum for culling
+            # Setup view frustum culling
             view_proj = np.array(self.projection @ self.view)
             frustum = self._calculate_frustum_planes(view_proj)
-            
-            # Get camera position for distance culling
             camera_pos = np.array([self.view[3][0], self.view[3][1], self.view[3][2]])
-            max_render_distance = 300.0  # Increased render distance
             
-            # Chunk-based rendering
+            # Chunk processing setup
             chunk_size = 16
-            chunks_x = (world.width + chunk_size - 1) // chunk_size
-            chunks_z = (world.depth + chunk_size - 1) // chunk_size
+            camera_chunk_x = int(camera_pos[0] / chunk_size)
+            camera_chunk_z = int(camera_pos[2] / chunk_size)
+            max_render_distance = 300.0
+            min_render_distance = 32.0
             
-            for cx in range(chunks_x):
-                for cz in range(chunks_z):
-                    # Calculate chunk bounds
-                    chunk_min_x = cx * chunk_size
-                    chunk_min_z = cz * chunk_size
-                    chunk_max_x = min((cx + 1) * chunk_size, world.width)
-                    chunk_max_z = min((cz + 1) * chunk_size, world.depth)
-                    
-                    # Check if chunk is in view frustum
+            # Cache for chunk data to reduce world queries
+            chunk_cache = {}
+            
+            # Process chunks in spiral order
+            chunks_to_render = self._get_chunks_to_render(world, camera_chunk_x, camera_chunk_z, 
+                                                        max_render_distance, chunk_size)
+            
+            for cx, cz, dist in chunks_to_render:
+                chunk_min_x = cx * chunk_size
+                chunk_max_x = min((cx + 1) * chunk_size, world.width)
+                chunk_min_z = cz * chunk_size
+                chunk_max_z = min((cz + 1) * chunk_size, world.depth)
+                
+                # Frustum culling for distant chunks
+                if dist > min_render_distance:
                     chunk_center = np.array([
                         (chunk_min_x + chunk_max_x) * 0.5,
                         world.height * 0.5,
                         (chunk_min_z + chunk_max_z) * 0.5
                     ])
-                    chunk_radius = np.sqrt(chunk_size * chunk_size * 2 + world.height * world.height) * 0.5
-                    
-                    # Skip frustum culling for nearby chunks
-                    chunk_dist = np.linalg.norm(chunk_center - camera_pos)
-                    if chunk_dist > 32.0 and not self._is_sphere_in_frustum(frustum, chunk_center, chunk_radius):
+                    if not self._is_sphere_in_frustum(frustum, chunk_center, 
+                            np.sqrt(chunk_size * chunk_size * 2 + world.height * world.height) * 0.5):
                         continue
-                    
-                    # Check chunk distance from camera
-                    if chunk_dist > max_render_distance + chunk_radius:
-                        continue
-                    
-                    # Render voxels in this chunk
+                
+                # Process voxels in optimal order
+                for y in range(world.height - 1, -1, -1):  # Top to bottom
                     for x in range(chunk_min_x, chunk_max_x):
                         for z in range(chunk_min_z, chunk_max_z):
-                            for y in range(world.height):
-                                voxel = world.get_voxel_data(x, y, z)
-                                if voxel and voxel.material_type != MaterialType.AIR:
-                                    # Quick distance check for individual voxels
-                                    voxel_pos = np.array([x, y, z])
-                                    if np.linalg.norm(voxel_pos - camera_pos) > max_render_distance:
-                                        continue
-                                        
-                                    # Check each face
-                                    for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
-                                        if self.should_render_face(world, x, y, z, dx, dy, dz):
-                                            # Calculate offset into instance_data array
-                                            offset = instance_count * 6
-                                            
-                                            # Position
-                                            instance_data[offset:offset+3] = [x, y, z]
-                                            
-                                            # Get base color for material
-                                            base_color = self.material_colors[voxel.material_type][:3]
-                                            
-                                            # Apply damage state modifier
-                                            damage_modifier = self.damage_modifiers[voxel.damage_state]
-                                            
-                                            # Final color
-                                            color = base_color * damage_modifier
-                                            instance_data[offset+3:offset+6] = color
-                                            
-                                            instance_count += 1
-                                            
-                                            # Render batch if full
-                                            if instance_count >= max_batch_size:
-                                                self._render_batch(instance_data, instance_count)
-                                                instance_count = 0
+                            voxel = world.get_voxel_data(x, y, z)
+                            if not voxel or voxel.material_type == MaterialType.AIR:
+                                continue
+                                
+                            # Check each face with material-specific rules
+                            for face_name, face_dir in self.face_masks.items():
+                                is_visible, can_merge = self._check_face_visibility(
+                                    world, chunk_cache, x, y, z, face_dir, voxel)
+                                    
+                                if is_visible and not can_merge:
+                                    if instance_count >= self.max_instances:
+                                        self._render_batch(instance_data, instance_count)
+                                        instance_count = 0
+                                    
+                                    offset = instance_count * 6
+                                    instance_data[offset:offset+3] = [x, y, z]
+                                    
+                                    base_color = self.material_colors[voxel.material_type][:3]
+                                    damage_modifier = self.damage_modifiers[voxel.damage_state]
+                                    instance_data[offset+3:offset+6] = base_color * damage_modifier
+                                    
+                                    instance_count += 1
                 
+                # Flush batch if needed
+                if instance_count >= self.max_instances * 0.75:
+                    self._render_batch(instance_data, instance_count)
+                    instance_count = 0
+            
             # Render remaining instances
             if instance_count > 0:
                 self._render_batch(instance_data[:instance_count * 6], instance_count)
@@ -568,21 +628,22 @@ class VoxelRenderer:
     def _render_batch(self, instance_data, instance_count):
         """Render a batch of instances efficiently"""
         try:
-            # Only print batch info occasionally for debugging
-            if instance_count > 100:  # Only print for larger batches
-                print(f"Rendering batch: {instance_count} instances")
+            if instance_count > 0:
+                # Ensure we don't exceed buffer size
+                if instance_count > self.max_instances:
+                    instance_count = self.max_instances
+                    instance_data = instance_data[:self.max_instances * 6]
                 
-            glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
-            glBufferSubData(GL_ARRAY_BUFFER, 0, instance_data.nbytes, instance_data)
-            
-            glBindVertexArray(self.vao)
-            glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None, instance_count)
-            glBindVertexArray(0)
-            glBindBuffer(GL_ARRAY_BUFFER, 0)
-            
-            if instance_count > 100:  # Only print for larger batches
-                print("Batch rendering complete")
-            
+                data_size = instance_count * 6 * 4  # 6 floats per instance, 4 bytes per float
+                
+                glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
+                glBufferSubData(GL_ARRAY_BUFFER, 0, data_size, instance_data)
+                
+                glBindVertexArray(self.vao)
+                glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None, instance_count)
+                glBindVertexArray(0)
+                glBindBuffer(GL_ARRAY_BUFFER, 0)
+                
         except Exception as e:
             print(f"Error in batch rendering: {e}")
             traceback.print_exc()
@@ -607,3 +668,46 @@ class VoxelRenderer:
                         )
                         glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None)
         glBindVertexArray(0) 
+
+    def _get_chunks_to_render(self, world, camera_chunk_x, camera_chunk_z, max_render_distance, chunk_size):
+        """Get chunks to render in a spiral pattern starting from the camera position"""
+        chunks = []
+        max_chunk_radius = int(max_render_distance / chunk_size)
+        
+        # Start at camera position
+        x, z = camera_chunk_x, camera_chunk_z
+        dx, dz = 0, -1  # Initial direction: up
+        radius = 0  # Current radius of spiral
+        steps = 0   # Steps taken in current direction
+        
+        # Generate spiral pattern
+        while radius <= max_chunk_radius:
+            # Calculate chunk position and distance
+            chunk_center_x = (x + 0.5) * chunk_size
+            chunk_center_z = (z + 0.5) * chunk_size
+            dist = ((chunk_center_x - camera_chunk_x * chunk_size) ** 2 + 
+                   (chunk_center_z - camera_chunk_z * chunk_size) ** 2) ** 0.5
+            
+            # Add chunk if within world bounds and render distance
+            if (0 <= x * chunk_size < world.width and 
+                0 <= z * chunk_size < world.depth and 
+                dist <= max_render_distance):
+                chunks.append((x, z, dist))
+            
+            # Take a step in current direction
+            x += dx
+            z += dz
+            steps += 1
+            
+            # Check if we need to change direction
+            if steps == radius:
+                steps = 0
+                # Rotate 90 degrees clockwise
+                dx, dz = -dz, dx
+                # Increase radius when completing half a circle
+                if dx == 0:
+                    radius += 1
+        
+        # Sort chunks by distance for better rendering
+        chunks.sort(key=lambda c: c[2])
+        return chunks 

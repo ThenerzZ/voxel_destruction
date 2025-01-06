@@ -1,60 +1,31 @@
-# Voxel Destruction Sandbox
+# Personal Voxel Game Project
 
-A simple voxel-based destruction simulator built with Python and OpenGL. This project allows you to explore a procedurally generated voxel world and destroy blocks.
+A small experiment with voxel-based destructible environments using Python and OpenGL. Built this to learn more about graphics programming and physics simulations.
 
-## Features
+## What it's supposed to do
+- Generate a voxel world with different materials (concrete, wood, glass, metal)
+- Allow for destruction and physics simulation of falling blocks
+- Have basic lighting and atmosphere effects
+- Support chunk-based rendering for performance
 
-- Procedurally generated terrain using Perlin noise
-- First-person camera controls
-- Voxel destruction mechanics
-- Basic lighting system
+## Current State
+The project is currently broken and probably won't be fixed since I've learned what I wanted from it. Main issues:
+- Rendering is extremely slow
+- Chunks don't display properly
+- Face culling is buggy
+- OpenGL buffer management needs work
 
-## Requirements
+## Tech Stack
+- Python 3.x
+- PyOpenGL for graphics
+- NumPy for math/arrays
+- Pyrr for matrix operations
 
-- Python 3.7+
-- OpenGL support
-- Required Python packages (install via pip):
-  - numpy
-  - PyOpenGL
-  - noise
-  - glfw
-  - pyrr
-
-## Installation
-
-1. Clone this repository
-2. Install the required packages:
-```bash
-pip install -r requirements.txt
+## Dependencies
+```
+numpy
+pyopengl
+pyrr
 ```
 
-## Usage
-
-Run the game:
-```bash
-python voxel_game.py
-```
-
-### Controls
-
-- WASD: Move camera
-- Mouse: Look around
-- Left Click: Destroy blocks (currently random blocks for testing)
-- ESC: Exit game
-
-## Project Structure
-
-- `voxel_game.py`: Main game loop and initialization
-- `renderer.py`: OpenGL rendering code
-- `shaders/`: GLSL shader files
-  - `vertex.glsl`: Vertex shader
-  - `fragment.glsl`: Fragment shader
-
-## Future Improvements
-
-- Ray casting for precise block destruction
-- Different block types and materials
-- Physics simulation for falling blocks
-- Block placement mechanics
-- Texture support
-- Chunk-based world generation for larger worlds 
+This is just a personal learning project - not meant for actual use or distribution. Keeping it around for reference and maybe future experiments with graphics programming. 

@@ -2,4 +2,4 @@ numpy==1.24.3
 PyOpenGL==3.1.7
 noise==1.2.2
 glfw==2.6.2
-pyrr==0.10.3 
+pyrr==0.10.3    
