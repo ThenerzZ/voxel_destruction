@@ -267,95 +267,127 @@ class VoxelRenderer:
         
     def set_uniforms(self):
         """Set all shader uniforms"""
-        glUseProgram(self.shader)
-        
-        # Set camera uniforms
-        view_loc = glGetUniformLocation(self.shader, "view")
-        proj_loc = glGetUniformLocation(self.shader, "projection")
-        
-        if view_loc != -1:
-            glUniformMatrix4fv(view_loc, 1, GL_FALSE, self.view)
-        if proj_loc != -1:
-            glUniformMatrix4fv(proj_loc, 1, GL_FALSE, self.projection)
-        
-        # Set view position
-        view_pos = pyrr.Vector3([self.view[3][0], self.view[3][1], self.view[3][2]])
-        view_pos_loc = glGetUniformLocation(self.shader, "viewPos")
-        if view_pos_loc != -1:
-            glUniform3fv(view_pos_loc, 1, view_pos)
+        try:
+            glUseProgram(self.shader)
+            
+            # Set camera uniforms
+            view_loc = glGetUniformLocation(self.shader, "view")
+            proj_loc = glGetUniformLocation(self.shader, "projection")
+            
+            if view_loc != -1:
+                glUniformMatrix4fv(view_loc, 1, GL_FALSE, self.view)
+            else:
+                print("Warning: Could not find view uniform")
+                
+            if proj_loc != -1:
+                glUniformMatrix4fv(proj_loc, 1, GL_FALSE, self.projection)
+            else:
+                print("Warning: Could not find projection uniform")
+            
+            # Set view position for specular lighting
+            view_pos = pyrr.Vector3([self.view[3][0], self.view[3][1], self.view[3][2]])
+            view_pos_loc = glGetUniformLocation(self.shader, "viewPos")
+            if view_pos_loc != -1:
+                glUniform3fv(view_pos_loc, 1, view_pos)
+            else:
+                print("Warning: Could not find viewPos uniform")
+                
+            # Set light position (temporary static light)
+            light_pos_loc = glGetUniformLocation(self.shader, "lightPos")
+            if light_pos_loc != -1:
+                light_pos = pyrr.Vector3([50.0, 100.0, 50.0])  # Light high above the world
+                glUniform3fv(light_pos_loc, 1, light_pos)
+            else:
+                print("Warning: Could not find lightPos uniform")
+                
+        except Exception as e:
+            print(f"Error setting uniforms: {e}")
+            traceback.print_exc()
         
     def render_world(self, world):
-        glUseProgram(self.shader)
-        
-        # Enable depth testing
-        glEnable(GL_DEPTH_TEST)
-        glDepthFunc(GL_LESS)
-        
-        # Disable face culling for now to see all faces
-        glDisable(GL_CULL_FACE)
-        
-        # Enable blending for transparent materials
-        glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-        
-        # Update and set uniforms
-        self.set_uniforms()
-        
-        # Render static world voxels
-        self._render_static_voxels(world)
-        
-        # Render falling chunks
-        self._render_chunks(world)
-        
-        # Render fragments
-        self._render_fragments(world)
+        try:
+            glUseProgram(self.shader)
+            
+            # Enable depth testing
+            glEnable(GL_DEPTH_TEST)
+            glDepthFunc(GL_LESS)
+            
+            # Disable face culling for now to see all faces
+            glDisable(GL_CULL_FACE)
+            
+            # Enable blending for transparent materials
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            
+            # Update and set uniforms
+            self.set_uniforms()
+            
+            # Render static world voxels
+            self._render_static_voxels(world)
+            
+            # Render falling chunks
+            self._render_chunks(world)
+            
+            # Render fragments
+            self._render_fragments(world)
+            
+        except Exception as e:
+            print(f"Error in render_world: {e}")
+            traceback.print_exc()
         
     def _render_static_voxels(self, world):
         """Render the static (non-moving) voxels in the world"""
-        # Pre-allocate arrays for better performance
-        max_instances = world.width * world.height * world.depth * 6  # 6 faces per voxel maximum
-        instance_data = np.zeros(max_instances * 6, dtype=np.float32)
-        instance_count = 0
-        
-        # Render each voxel
-        for x in range(world.width):
-            for y in range(world.height):
-                for z in range(world.depth):
-                    voxel = world.get_voxel_data(x, y, z)
-                    if voxel and voxel.material_type != MaterialType.AIR:
-                        # Check each face
-                        for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
-                            if self.should_render_face(world, x, y, z, dx, dy, dz):
-                                # Calculate offset into instance_data array
-                                offset = instance_count * 6
-                                
-                                # Position
-                                instance_data[offset:offset+3] = [x, y, z]
-                                
-                                # Get base color for material
-                                base_color = self.material_colors[voxel.material_type][:3]  # Only take RGB components
-                                
-                                # Apply damage state modifier
-                                damage_modifier = self.damage_modifiers[voxel.damage_state]
-                                
-                                # Apply deformation effect (darken and add redness for deformed metal/wood)
-                                if voxel.deformation > 0:
-                                    deform_color = np.array([0.8, 0.2, 0.2])  # Reddish tint
-                                    base_color = base_color * (1.0 - voxel.deformation) + deform_color * voxel.deformation
-                                
-                                # Final color
-                                color = base_color * damage_modifier
-                                instance_data[offset+3:offset+6] = color
-                                
-                                instance_count += 1
-                                
-                                if instance_count >= self.max_instances:
-                                    self._render_batch(instance_data[:instance_count * 6], instance_count)
-                                    instance_count = 0
-        
-        if instance_count > 0:
-            self._render_batch(instance_data[:instance_count * 6], instance_count)
+        try:
+            print("\nStarting static voxel rendering...")
+            # Pre-allocate arrays for better performance
+            max_instances = world.width * world.height * world.depth * 6  # 6 faces per voxel maximum
+            instance_data = np.zeros(max_instances * 6, dtype=np.float32)
+            instance_count = 0
             
+            print(f"Allocated instance data array for {max_instances} instances")
+            
+            # Render each voxel
+            for x in range(world.width):
+                for y in range(world.height):
+                    for z in range(world.depth):
+                        voxel = world.get_voxel_data(x, y, z)
+                        if voxel and voxel.material_type != MaterialType.AIR:
+                            # Check each face
+                            for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
+                                if self.should_render_face(world, x, y, z, dx, dy, dz):
+                                    # Calculate offset into instance_data array
+                                    offset = instance_count * 6
+                                    
+                                    # Position
+                                    instance_data[offset:offset+3] = [x, y, z]
+                                    
+                                    # Get base color for material
+                                    base_color = self.material_colors[voxel.material_type][:3]
+                                    
+                                    # Apply damage state modifier
+                                    damage_modifier = self.damage_modifiers[voxel.damage_state]
+                                    
+                                    # Final color
+                                    color = base_color * damage_modifier
+                                    instance_data[offset+3:offset+6] = color
+                                    
+                                    instance_count += 1
+                                    
+                                    if instance_count >= self.max_instances:
+                                        print(f"Rendering batch of {instance_count} instances")
+                                        self._render_batch(instance_data[:instance_count * 6], instance_count)
+                                        instance_count = 0
+            
+            if instance_count > 0:
+                print(f"Rendering final batch of {instance_count} instances")
+                self._render_batch(instance_data[:instance_count * 6], instance_count)
+                
+            print("Static voxel rendering complete")
+            
+        except Exception as e:
+            print(f"Error in static voxel rendering: {e}")
+            traceback.print_exc()
+        
     def _render_chunks(self, world):
         """Render falling chunks"""
         for chunk in world.physics.chunks:
@@ -415,13 +447,20 @@ class VoxelRenderer:
             
     def _render_batch(self, instance_data, instance_count):
         """Render a batch of instances efficiently"""
-        glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
-        glBufferSubData(GL_ARRAY_BUFFER, 0, instance_data.nbytes, instance_data)
-        
-        glBindVertexArray(self.vao)
-        glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None, instance_count)
-        glBindVertexArray(0)
-        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        try:
+            print(f"Rendering batch: {instance_count} instances")
+            glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
+            glBufferSubData(GL_ARRAY_BUFFER, 0, instance_data.nbytes, instance_data)
+            
+            glBindVertexArray(self.vao)
+            glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None, instance_count)
+            glBindVertexArray(0)
+            glBindBuffer(GL_ARRAY_BUFFER, 0)
+            print("Batch rendering complete")
+            
+        except Exception as e:
+            print(f"Error in batch rendering: {e}")
+            traceback.print_exc()
         
     def render_cube(self):
         """Render a single cube"""

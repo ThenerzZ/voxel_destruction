@@ -155,6 +155,7 @@ class Game:
         glfw.window_hint(glfw.VISIBLE, True)
         glfw.window_hint(glfw.RESIZABLE, True)
         glfw.window_hint(glfw.DOUBLEBUFFER, True)
+        glfw.window_hint(glfw.SAMPLES, 4)  # Enable MSAA
             
         # Create window before doing anything else
         self.window = glfw.create_window(width, height, "Voxel Destruction Sandbox", None, None)
@@ -191,8 +192,12 @@ class Game:
             self.renderer = VoxelRenderer()
             print("Renderer initialized!")
             
-            # Start at a better position to see more of the world
-            self.camera = Camera(position=np.array([32.0, 24.0, 32.0]))
+            # Start at a better position to see the world
+            self.camera = Camera(
+                position=np.array([16.0, 32.0, 32.0]),  # Higher up and further back
+                yaw=-45.0,  # Look towards the world
+                pitch=-30.0  # Look down slightly
+            )
             
             self.last_frame = glfw.get_time()
             self.delta_time = 0.0
@@ -210,7 +215,7 @@ class Game:
         glEnable(GL_CULL_FACE)
         glCullFace(GL_BACK)
         glFrontFace(GL_CCW)
-        glClearColor(0.5, 0.7, 1.0, 1.0)
+        glClearColor(0.2, 0.3, 0.5, 1.0)  # Darker blue background
         print("OpenGL setup complete")
         
     def cursor_callback(self, window, xpos, ypos):
