@@ -17,6 +17,16 @@ class VoxelRenderer:
         self.ebo = None
         self.instance_vbo = None
         
+        # Face direction vectors for culling checks
+        self.face_directions = [
+            ( 0,  0,  1),  # Front  (+Z)
+            ( 0,  0, -1),  # Back   (-Z)
+            ( 0,  1,  0),  # Top    (+Y)
+            ( 0, -1,  0),  # Bottom (-Y)
+            ( 1,  0,  0),  # Right  (+X)
+            (-1,  0,  0),  # Left   (-X)
+        ]
+        
         # Initialize lighting and atmosphere systems
         self.lighting_system = LightingSystem()
         self.atmosphere_system = AtmosphereSystem()
@@ -25,6 +35,22 @@ class VoxelRenderer:
         self.setup_shaders()
         self.setup_matrices()
         self.setup_cube()
+        
+    def should_render_face(self, world, x, y, z, dx, dy, dz):
+        """Check if a face should be rendered based on adjacent voxels"""
+        # Check if the adjacent block position is valid
+        adj_x = x + dx
+        adj_y = y + dy
+        adj_z = z + dz
+        
+        # If adjacent position is outside world bounds, always render the face
+        if not (0 <= adj_x < world.width and 
+                0 <= adj_y < world.height and 
+                0 <= adj_z < world.depth):
+            return True
+        
+        # If adjacent block is air (0), render the face
+        return world.voxels[adj_x, adj_y, adj_z] == 0
         
     def setup_shaders(self):
         with open('shaders/vertex.glsl', 'r') as file:
@@ -50,49 +76,50 @@ class VoxelRenderer:
         # Define vertices for a unit cube centered at origin
         vertices = np.array([
             # Front face (+Z)
-            -0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 0.0,
-             0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 0.0,
-             0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 1.0,
-            -0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 1.0,
+            -0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 0.0,  # 0
+             0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 0.0,  # 1
+             0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 1.0,  # 2
+            -0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 1.0,  # 3
 
             # Back face (-Z)
-             0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
-            -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,
-            -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
-             0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,
+            -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,  # 4
+             0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,  # 5
+             0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,  # 6
+            -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,  # 7
 
             # Top face (+Y)
-            -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 0.0,
-            -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 1.0,
-             0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 1.0,
-             0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
+            -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0,  # 8
+             0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 1.0,  # 9
+             0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,  # 10
+            -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 0.0,  # 11
 
             # Bottom face (-Y)
-            -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 0.0,
-             0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
-             0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 1.0,
-            -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
+            -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 0.0,  # 12
+             0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 0.0,  # 13
+             0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 1.0,  # 14
+            -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 1.0,  # 15
 
             # Right face (+X)
-             0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 0.0,
-             0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
-             0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  1.0, 1.0,
-             0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
+             0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 0.0,  # 16
+             0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 1.0,  # 17
+             0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 1.0,  # 18
+             0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 0.0,  # 19
 
             # Left face (-X)
-            -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 0.0,
-            -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
-            -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 1.0,
-            -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
+            -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 0.0,  # 20
+            -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,  # 21
+            -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 1.0,  # 22
+            -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,  # 23
         ], dtype=np.float32)
 
+        # Define indices for all faces
         indices = np.array([
-            0,  1,  2,    0,  2,  3,   # Front
-            4,  5,  6,    4,  6,  7,   # Back
-            8,  9,  10,   8,  10, 11,  # Top
-            12, 13, 14,   12, 14, 15,  # Bottom
-            16, 17, 18,   16, 18, 19,  # Right
-            20, 21, 22,   20, 22, 23   # Left
+            0,  1,  2,    2,  3,  0,   # Front
+            4,  5,  6,    6,  7,  4,   # Back
+            8,  9,  10,   10, 11, 8,   # Top
+            12, 13, 14,   14, 15, 12,  # Bottom
+            16, 17, 18,   18, 19, 16,  # Right
+            20, 21, 22,   22, 23, 20   # Left
         ], dtype=np.uint32)
 
         # Create and bind VAO
@@ -126,8 +153,8 @@ class VoxelRenderer:
         self.instance_vbo = glGenBuffers(1)
         glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
         
-        # Each instance needs: position (3), color (3), face index (1)
-        instance_stride = (3 + 3 + 1) * 4  # 7 floats * 4 bytes
+        # Each instance needs: position (3), color (3)
+        instance_stride = 6 * 4  # 6 floats * 4 bytes
         buffer_size = self.max_instances * instance_stride
         glBufferData(GL_ARRAY_BUFFER, buffer_size, None, GL_DYNAMIC_DRAW)
         
@@ -140,11 +167,6 @@ class VoxelRenderer:
         glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, instance_stride, ctypes.c_void_p(12))
         glEnableVertexAttribArray(4)
         glVertexAttribDivisor(4, 1)
-        
-        # Instance face index attribute (location = 5)
-        glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, instance_stride, ctypes.c_void_p(24))
-        glEnableVertexAttribArray(5)
-        glVertexAttribDivisor(5, 1)
         
         # Cleanup
         glBindVertexArray(0)
@@ -175,76 +197,73 @@ class VoxelRenderer:
         if view_pos_loc != -1:
             glUniform3fv(view_pos_loc, 1, view_pos)
         
-        # Set lighting uniforms
-        lighting_uniforms = self.lighting_system.get_lighting_uniforms()
-        for name, value in lighting_uniforms.items():
-            loc = glGetUniformLocation(self.shader, name)
-            if loc != -1:  # Only set if uniform exists in shader
-                try:
-                    if isinstance(value, np.ndarray):
-                        if value.size == 3:
-                            glUniform3fv(loc, 1, value)
-                        elif value.size == 16:
-                            glUniformMatrix4fv(loc, 1, GL_FALSE, value)
-                    elif isinstance(value, (int, float)):
-                        glUniform1f(loc, float(value))
-                except Exception as e:
-                    print(f"Error setting uniform {name}: {e}")
-                
-        # Set atmosphere uniforms
-        atmosphere_uniforms = self.atmosphere_system.get_atmosphere_uniforms()
-        for name, value in atmosphere_uniforms.items():
-            loc = glGetUniformLocation(self.shader, name)
-            if loc != -1:  # Only set if uniform exists in shader
-                try:
-                    if isinstance(value, np.ndarray):
-                        if value.size == 3:
-                            glUniform3fv(loc, 1, value)
-                    elif isinstance(value, (int, float)):
-                        glUniform1f(loc, float(value))
-                except Exception as e:
-                    print(f"Error setting uniform {name}: {e}")
-        
     def render_world(self, world):
         glUseProgram(self.shader)
         
         # Enable depth testing
         glEnable(GL_DEPTH_TEST)
+        glDepthFunc(GL_LESS)
+        
+        # Disable face culling for now to debug visibility issues
+        glDisable(GL_CULL_FACE)
+        
+        # Clear buffers
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         
         # Update and set uniforms
         self.set_uniforms()
         
-        # Collect visible voxels
-        instance_data = []
+        # Pre-allocate arrays for better performance
+        max_faces = world.width * world.height * world.depth * 6  # Maximum possible faces
+        instance_data = np.zeros(max_faces * 6, dtype=np.float32)  # 6 floats per instance
         instance_count = 0
         
         # Face colors for different orientations
         face_colors = [
-            [0.8, 0.8, 0.8],  # Front
-            [0.7, 0.7, 0.7],  # Back
-            [0.9, 0.9, 0.9],  # Top
-            [0.6, 0.6, 0.6],  # Bottom
-            [0.75, 0.75, 0.75],  # Right
-            [0.7, 0.7, 0.7],  # Left
+            [1.00, 0.80, 0.80],  # Front  (+Z) - Salmon pink
+            [0.80, 0.80, 1.00],  # Back   (-Z) - Light blue
+            [1.00, 1.00, 1.00],  # Top    (+Y) - White
+            [0.70, 0.70, 0.70],  # Bottom (-Y) - Gray
+            [0.80, 1.00, 0.80],  # Right  (+X) - Light green
+            [1.00, 0.90, 0.80],  # Left   (-X) - Peach
         ]
         
+        # Render voxels
         for x in range(world.width):
             for y in range(world.height):
                 for z in range(world.depth):
                     if world.voxels[x, y, z] == 1:
-                        # Add each face with its position, color, and face index
-                        for face_idx, color in enumerate(face_colors):
-                            instance_data.extend([x, y, z] + color + [float(face_idx)])
-                            instance_count += 1
+                        # Check each face
+                        for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
+                            adj_x = x + dx
+                            adj_y = y + dy
+                            adj_z = z + dz
                             
-                            if instance_count >= self.max_instances:
-                                self._render_batch(instance_data, instance_count)
-                                instance_data = []
-                                instance_count = 0
+                            # Render face if it's at the edge or next to an air block
+                            if (not (0 <= adj_x < world.width and 
+                                   0 <= adj_y < world.height and 
+                                   0 <= adj_z < world.depth) or
+                                world.voxels[adj_x, adj_y, adj_z] == 0):
+                                
+                                # Calculate offset into instance_data array
+                                offset = instance_count * 6
+                                # Position
+                                instance_data[offset:offset+3] = [x, y, z]
+                                # Color
+                                instance_data[offset+3:offset+6] = face_colors[face_idx]
+                                instance_count += 1
+                                
+                                if instance_count >= self.max_instances:
+                                    self._render_batch(instance_data[:instance_count * 6], instance_count)
+                                    instance_count = 0
         
         if instance_count > 0:
-            self._render_batch(instance_data, instance_count)
-            
+            self._render_batch(instance_data[:instance_count * 6], instance_count)
+        
+        # Cleanup
+        glBindVertexArray(0)
+        glBindBuffer(GL_ARRAY_BUFFER, 0)
+
     def _render_batch(self, instance_data, instance_count):
         instance_data = np.array(instance_data, dtype=np.float32)
         
