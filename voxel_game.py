@@ -36,7 +36,7 @@ signal.signal(signal.SIGILL, signal_handler)
 signal.signal(signal.SIGFPE, signal_handler)
 
 class VoxelWorld:
-    def __init__(self, width=32, height=16, depth=32, seed=None):
+    def __init__(self, width=128, height=64, depth=128, seed=None):
         try:
             print(f"Creating VoxelWorld with dimensions: {width}x{height}x{depth}")
             self.width = width
@@ -193,11 +193,9 @@ class Game:
             print("Renderer initialized!")
             
             # Start at a better position to see the world
-            self.camera = Camera(
-                position=np.array([16.0, 32.0, 32.0]),  # Higher up and further back
-                yaw=-45.0,  # Look towards the world
-                pitch=-30.0  # Look down slightly
-            )
+            self.camera = Camera(position=np.array([64.0, 48.0, 64.0]))  # Position in middle of world, high up
+            self.camera.yaw = -45.0  # Look diagonally
+            self.camera.pitch = -30.0  # Look down slightly
             
             self.last_frame = glfw.get_time()
             self.delta_time = 0.0
