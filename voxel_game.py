@@ -195,8 +195,13 @@ class Game:
             self.delta_time = current_frame - self.last_frame
             self.last_frame = current_frame
             
+            # Process input
             self.process_input()
             
+            # Update systems
+            self.renderer.update(self.delta_time)
+            
+            # Clear buffers
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             
             # Update view matrix based on camera

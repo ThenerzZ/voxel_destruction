@@ -4,6 +4,8 @@ from OpenGL.GL import shaders
 import pyrr
 import os
 import ctypes
+from lighting import LightingSystem
+from atmosphere import AtmosphereSystem
 
 class VoxelRenderer:
     def __init__(self):
@@ -14,6 +16,10 @@ class VoxelRenderer:
         self.vbo = None
         self.ebo = None
         self.instance_vbo = None
+        
+        # Initialize lighting and atmosphere systems
+        self.lighting_system = LightingSystem()
+        self.atmosphere_system = AtmosphereSystem()
         
         # Setup OpenGL resources
         self.setup_shaders()
@@ -119,54 +125,99 @@ class VoxelRenderer:
         # Create and set up instance buffer
         self.instance_vbo = glGenBuffers(1)
         glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
-        buffer_size = self.max_instances * 7 * 4  # 7 floats per instance (3 for position, 3 for color, 1 for face index) * 4 bytes per float
+        
+        # Each instance needs: position (3), color (3), face index (1)
+        instance_stride = (3 + 3 + 1) * 4  # 7 floats * 4 bytes
+        buffer_size = self.max_instances * instance_stride
         glBufferData(GL_ARRAY_BUFFER, buffer_size, None, GL_DYNAMIC_DRAW)
-
-        # Instance position attribute
-        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 28, ctypes.c_void_p(0))
+        
+        # Instance position attribute (location = 3)
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, instance_stride, ctypes.c_void_p(0))
         glEnableVertexAttribArray(3)
         glVertexAttribDivisor(3, 1)
-
-        # Instance color attribute
-        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 28, ctypes.c_void_p(12))
+        
+        # Instance color attribute (location = 4)
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, instance_stride, ctypes.c_void_p(12))
         glEnableVertexAttribArray(4)
         glVertexAttribDivisor(4, 1)
-
-        # Instance face index attribute
-        glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, 28, ctypes.c_void_p(24))
+        
+        # Instance face index attribute (location = 5)
+        glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, instance_stride, ctypes.c_void_p(24))
         glEnableVertexAttribArray(5)
         glVertexAttribDivisor(5, 1)
-
+        
         # Cleanup
         glBindVertexArray(0)
         glBindBuffer(GL_ARRAY_BUFFER, 0)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0)
 
+    def update(self, delta_time):
+        """Update lighting and atmosphere systems"""
+        self.lighting_system.update(delta_time)
+        self.atmosphere_system.update(delta_time, self.lighting_system.time_of_day)
+        
+    def set_uniforms(self):
+        """Set all shader uniforms"""
+        glUseProgram(self.shader)
+        
+        # Set camera uniforms
+        view_loc = glGetUniformLocation(self.shader, "view")
+        proj_loc = glGetUniformLocation(self.shader, "projection")
+        
+        if view_loc != -1:
+            glUniformMatrix4fv(view_loc, 1, GL_FALSE, self.view)
+        if proj_loc != -1:
+            glUniformMatrix4fv(proj_loc, 1, GL_FALSE, self.projection)
+        
+        # Set view position
+        view_pos = pyrr.Vector3([self.view[3][0], self.view[3][1], self.view[3][2]])
+        view_pos_loc = glGetUniformLocation(self.shader, "viewPos")
+        if view_pos_loc != -1:
+            glUniform3fv(view_pos_loc, 1, view_pos)
+        
+        # Set lighting uniforms
+        lighting_uniforms = self.lighting_system.get_lighting_uniforms()
+        for name, value in lighting_uniforms.items():
+            loc = glGetUniformLocation(self.shader, name)
+            if loc != -1:  # Only set if uniform exists in shader
+                try:
+                    if isinstance(value, np.ndarray):
+                        if value.size == 3:
+                            glUniform3fv(loc, 1, value)
+                        elif value.size == 16:
+                            glUniformMatrix4fv(loc, 1, GL_FALSE, value)
+                    elif isinstance(value, (int, float)):
+                        glUniform1f(loc, float(value))
+                except Exception as e:
+                    print(f"Error setting uniform {name}: {e}")
+                
+        # Set atmosphere uniforms
+        atmosphere_uniforms = self.atmosphere_system.get_atmosphere_uniforms()
+        for name, value in atmosphere_uniforms.items():
+            loc = glGetUniformLocation(self.shader, name)
+            if loc != -1:  # Only set if uniform exists in shader
+                try:
+                    if isinstance(value, np.ndarray):
+                        if value.size == 3:
+                            glUniform3fv(loc, 1, value)
+                    elif isinstance(value, (int, float)):
+                        glUniform1f(loc, float(value))
+                except Exception as e:
+                    print(f"Error setting uniform {name}: {e}")
+        
     def render_world(self, world):
         glUseProgram(self.shader)
         
-        # Enable depth testing but disable face culling
+        # Enable depth testing
         glEnable(GL_DEPTH_TEST)
-        glDisable(GL_CULL_FACE)  # We want to see all faces
         
-        # Set uniforms
-        glUniformMatrix4fv(
-            glGetUniformLocation(self.shader, "view"),
-            1, GL_FALSE, self.view
-        )
-        glUniformMatrix4fv(
-            glGetUniformLocation(self.shader, "projection"),
-            1, GL_FALSE, self.projection
-        )
-        glUniform3fv(
-            glGetUniformLocation(self.shader, "lightPos"),
-            1, np.array([50.0, 50.0, 50.0], dtype=np.float32)
-        )
-        glUniform3fv(
-            glGetUniformLocation(self.shader, "viewPos"),
-            1, np.array([0.0, 0.0, 0.0], dtype=np.float32)
-        )
-
+        # Update and set uniforms
+        self.set_uniforms()
+        
+        # Collect visible voxels
+        instance_data = []
+        instance_count = 0
+        
         # Face colors for different orientations
         face_colors = [
             [0.8, 0.8, 0.8],  # Front
@@ -176,10 +227,6 @@ class VoxelRenderer:
             [0.75, 0.75, 0.75],  # Right
             [0.7, 0.7, 0.7],  # Left
         ]
-        
-        # Collect visible voxels
-        instance_data = []
-        instance_count = 0
         
         for x in range(world.width):
             for y in range(world.height):
