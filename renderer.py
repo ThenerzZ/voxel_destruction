@@ -7,6 +7,7 @@ import ctypes
 from lighting import LightingSystem
 from atmosphere import AtmosphereSystem
 from physics import MaterialType
+import traceback
 
 class VoxelRenderer:
     def __init__(self):
@@ -73,14 +74,80 @@ class VoxelRenderer:
         return adj_voxel is None or adj_voxel.material_type == MaterialType.AIR
         
     def setup_shaders(self):
-        with open('shaders/vertex.glsl', 'r') as file:
-            vertex_shader = shaders.compileShader(file.read(), GL_VERTEX_SHADER)
-        with open('shaders/fragment.glsl', 'r') as file:
-            fragment_shader = shaders.compileShader(file.read(), GL_FRAGMENT_SHADER)
-            
-        self.shader = shaders.compileProgram(vertex_shader, fragment_shader)
-        glUseProgram(self.shader)
+        print("\nCompiling shaders...")
+        vertex_shader = None
+        fragment_shader = None
         
+        try:
+            # Compile vertex shader
+            print("Reading vertex shader source...")
+            try:
+                with open('shaders/vertex.glsl', 'r') as file:
+                    vertex_source = file.read()
+                    print("Vertex shader source loaded successfully")
+            except Exception as e:
+                print(f"Failed to read vertex shader: {e}")
+                raise
+            
+            print("Compiling vertex shader...")
+            try:
+                vertex_shader = shaders.compileShader(vertex_source, GL_VERTEX_SHADER)
+                print("Vertex shader compiled successfully")
+            except Exception as e:
+                print(f"Vertex shader compilation failed:")
+                print(f"Error: {str(e)}")
+                raise
+            
+            # Compile fragment shader
+            print("Reading fragment shader source...")
+            try:
+                with open('shaders/fragment.glsl', 'r') as file:
+                    fragment_source = file.read()
+                    print("Fragment shader source loaded successfully")
+            except Exception as e:
+                print(f"Failed to read fragment shader: {e}")
+                if vertex_shader:
+                    glDeleteShader(vertex_shader)
+                raise
+            
+            print("Compiling fragment shader...")
+            try:
+                fragment_shader = shaders.compileShader(fragment_source, GL_FRAGMENT_SHADER)
+                print("Fragment shader compiled successfully")
+            except Exception as e:
+                print(f"Fragment shader compilation failed:")
+                print(f"Error: {str(e)}")
+                if vertex_shader:
+                    glDeleteShader(vertex_shader)
+                raise
+            
+            # Link shader program
+            print("Linking shader program...")
+            try:
+                self.shader = shaders.compileProgram(vertex_shader, fragment_shader)
+                print("Shader program linked successfully")
+            except Exception as e:
+                print(f"Shader program linking failed:")
+                print(f"Error: {str(e)}")
+                if vertex_shader:
+                    glDeleteShader(vertex_shader)
+                if fragment_shader:
+                    glDeleteShader(fragment_shader)
+                raise
+            
+            # Clean up individual shaders
+            glDeleteShader(vertex_shader)
+            glDeleteShader(fragment_shader)
+            
+            # Activate shader program
+            glUseProgram(self.shader)
+            print("Shader program activated successfully\n")
+            
+        except Exception as e:
+            print(f"\nFatal error in shader setup: {e}")
+            traceback.print_exc()
+            raise
+            
     def setup_matrices(self):
         self.projection = pyrr.matrix44.create_perspective_projection(
             70.0, 800.0/600.0, 0.1, 1000.0, dtype=np.float32

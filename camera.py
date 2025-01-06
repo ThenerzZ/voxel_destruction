@@ -15,7 +15,7 @@ class Camera:
         self.pitch = 0.0
         
         # Camera settings
-        self.movement_speed = 5.0
+        self.movement_speed = 20.0
         self.mouse_sensitivity = 0.1
         
         # Mouse tracking
@@ -30,6 +30,9 @@ class Camera:
         self.moving_right = False
         self.moving_up = False
         self.moving_down = False
+        
+        # Sprint state
+        self.sprinting = False
         
     def get_view_matrix(self):
         return pyrr.matrix44.create_look_at(
@@ -53,6 +56,8 @@ class Camera:
                 self.moving_up = True
             elif key == glfw.KEY_LEFT_SHIFT:
                 self.moving_down = True
+            elif key == glfw.KEY_LEFT_CONTROL:
+                self.sprinting = True
         elif action == glfw.RELEASE:
             if key == glfw.KEY_W:
                 self.moving_forward = False
@@ -66,6 +71,8 @@ class Camera:
                 self.moving_up = False
             elif key == glfw.KEY_LEFT_SHIFT:
                 self.moving_down = False
+            elif key == glfw.KEY_LEFT_CONTROL:
+                self.sprinting = False
                 
     def handle_mouse_movement(self, xpos, ypos):
         """Handle mouse movement for camera rotation"""
@@ -109,7 +116,9 @@ class Camera:
         
     def update(self, delta_time):
         """Update camera position based on movement state"""
-        velocity = self.movement_speed * delta_time
+        # Calculate actual movement speed (sprint is 2x normal speed)
+        current_speed = self.movement_speed * (2.0 if self.sprinting else 1.0)
+        velocity = current_speed * delta_time
         
         if self.moving_forward:
             self.position += self.front * velocity
