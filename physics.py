@@ -80,6 +80,45 @@ class VoxelFragment:
         # Update lifetime
         self.lifetime -= dt
 
+class VoxelChunk:
+    def __init__(self, voxels, position):
+        self.voxels = voxels
+        self.dimensions = np.array(voxels.shape)
+        self.position = np.array(position, dtype=np.float32)
+        self.velocity = np.zeros(3)
+        self.angular_velocity = np.zeros(3)
+        self.rotation = np.eye(3)
+        self.lifetime = 10.0  # Chunks disappear after this time if they don't settle
+        
+    def update(self, dt):
+        # Apply gravity
+        self.velocity[1] -= 9.81 * dt
+        
+        # Update position
+        self.position += self.velocity * dt
+        
+        # Update rotation
+        angle = np.linalg.norm(self.angular_velocity) * dt
+        if angle > 0:
+            axis = self.angular_velocity / np.linalg.norm(self.angular_velocity)
+            cos_angle = np.cos(angle)
+            sin_angle = np.sin(angle)
+            rotation_matrix = np.array([
+                [cos_angle + axis[0]**2 * (1 - cos_angle),
+                 axis[0] * axis[1] * (1 - cos_angle) - axis[2] * sin_angle,
+                 axis[0] * axis[2] * (1 - cos_angle) + axis[1] * sin_angle],
+                [axis[1] * axis[0] * (1 - cos_angle) + axis[2] * sin_angle,
+                 cos_angle + axis[1]**2 * (1 - cos_angle),
+                 axis[1] * axis[2] * (1 - cos_angle) - axis[0] * sin_angle],
+                [axis[2] * axis[0] * (1 - cos_angle) - axis[1] * sin_angle,
+                 axis[2] * axis[1] * (1 - cos_angle) + axis[0] * sin_angle,
+                 cos_angle + axis[2]**2 * (1 - cos_angle)]
+            ])
+            self.rotation = np.dot(rotation_matrix, self.rotation)
+            
+        # Update lifetime
+        self.lifetime -= dt
+
 class PhysicsSystem:
     def __init__(self, world):
         self.world = world
@@ -332,44 +371,13 @@ class PhysicsSystem:
         for chunk in self.chunks:
             chunk.update(dt)
             
-        # Handle collisions
-        self.handle_collisions()
-        
-        # Remove chunks that have settled
-        self.chunks = [chunk for chunk in self.chunks if not self.has_chunk_settled(chunk)]
-        
-    def handle_collisions(self):
-        """Handle collisions between chunks and world"""
-        for chunk in self.chunks:
-            # Check collision with world bounds and other voxels
-            chunk_bounds = np.array([
-                chunk.position,
-                chunk.position + chunk.dimensions
-            ])
-            
-            # Floor collision
-            if chunk_bounds[0][1] <= 0:
-                chunk.position[1] = 0
-                chunk.velocity[1] = -chunk.velocity[1] * 0.3  # Bounce with energy loss
-                chunk.angular_velocity *= 0.7  # Reduce rotation on impact
-                
-                if abs(chunk.velocity[1]) < 0.1:  # If nearly stopped
-                    self.merge_chunk_with_world(chunk)
-                
-            # World voxel collision
+            # Handle chunk collisions
+            if chunk.position[1] <= 0:
+                # Merge chunk with world when it hits ground
+                self.merge_chunk_with_world(chunk)
             elif self.check_chunk_world_collision(chunk):
-                # Reflect velocity and reduce energy
-                chunk.velocity *= -0.3
-                chunk.angular_velocity *= 0.7
+                # Merge chunk with world when it hits other blocks
+                self.merge_chunk_with_world(chunk)
                 
-                if np.linalg.norm(chunk.velocity) < 0.1:  # If nearly stopped
-                    self.merge_chunk_with_world(chunk)
-                    
-    def has_chunk_settled(self, chunk):
-        """Check if a physics chunk has come to rest"""
-        velocity_threshold = 0.01
-        angular_velocity_threshold = 0.01
-        
-        return (np.linalg.norm(chunk.velocity) < velocity_threshold and
-                np.linalg.norm(chunk.angular_velocity) < angular_velocity_threshold and
-                (chunk.position[1] <= 0.01 or self.check_chunk_world_collision(chunk))) 
+        # Remove chunks that have been merged or expired
+        self.chunks = [chunk for chunk in self.chunks if chunk.lifetime > 0] 

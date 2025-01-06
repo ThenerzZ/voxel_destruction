@@ -234,6 +234,17 @@ class VoxelRenderer:
         # Update and set uniforms
         self.set_uniforms()
         
+        # Render static world voxels
+        self._render_static_voxels(world)
+        
+        # Render falling chunks
+        self._render_chunks(world)
+        
+        # Render fragments
+        self._render_fragments(world)
+        
+    def _render_static_voxels(self, world):
+        """Render the static (non-moving) voxels in the world"""
         # Pre-allocate arrays for better performance
         max_instances = world.width * world.height * world.depth * 6  # 6 faces per voxel maximum
         instance_data = np.zeros(max_instances * 6, dtype=np.float32)
@@ -278,7 +289,48 @@ class VoxelRenderer:
         if instance_count > 0:
             self._render_batch(instance_data[:instance_count * 6], instance_count)
             
-        # Render fragments with material-specific appearances
+    def _render_chunks(self, world):
+        """Render falling chunks"""
+        for chunk in world.physics.chunks:
+            # Pre-allocate arrays for this chunk
+            max_instances = chunk.dimensions[0] * chunk.dimensions[1] * chunk.dimensions[2] * 6
+            instance_data = np.zeros(max_instances * 6, dtype=np.float32)
+            instance_count = 0
+            
+            # Render each voxel in the chunk
+            for x in range(chunk.dimensions[0]):
+                for y in range(chunk.dimensions[1]):
+                    for z in range(chunk.dimensions[2]):
+                        voxel = chunk.voxels[x, y, z]
+                        if voxel and voxel.material_type != MaterialType.AIR:
+                            # Calculate world position
+                            world_pos = chunk.position + np.array([x, y, z])
+                            
+                            # Add instance data for each face
+                            for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
+                                # Always render all faces for falling chunks
+                                offset = instance_count * 6
+                                
+                                # Position
+                                instance_data[offset:offset+3] = world_pos
+                                
+                                # Get base color for material
+                                base_color = self.material_colors[voxel.material_type][:3]
+                                
+                                # Apply damage state modifier
+                                damage_modifier = self.damage_modifiers[voxel.damage_state]
+                                
+                                # Final color
+                                color = base_color * damage_modifier
+                                instance_data[offset+3:offset+6] = color
+                                
+                                instance_count += 1
+                                
+            if instance_count > 0:
+                self._render_batch(instance_data[:instance_count * 6], instance_count)
+                
+    def _render_fragments(self, world):
+        """Render debris fragments"""
         if world.physics.fragments:
             fragment_data = np.zeros(len(world.physics.fragments) * 6, dtype=np.float32)
             for i, fragment in enumerate(world.physics.fragments):
@@ -286,7 +338,7 @@ class VoxelRenderer:
                 fragment_data[offset:offset+3] = fragment.position
                 
                 # Get base color for fragment material
-                base_color = self.material_colors[fragment.material_type]
+                base_color = self.material_colors[fragment.material_type][:3]
                 
                 # Add some variation based on fragment lifetime
                 intensity = 0.6 + 0.2 * np.sin(fragment.lifetime * 5.0)
