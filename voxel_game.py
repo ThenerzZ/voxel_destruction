@@ -122,7 +122,7 @@ class Game:
         # Capture mouse
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_DISABLED)
         
-        self.camera = Camera()
+        self.camera = Camera(position=np.array([16.0, 16.0, 32.0], dtype=np.float32))  # Position camera further back
         self.world = VoxelWorld(32, 32, 32)  # Larger world
         self.setup_gl()
         self.renderer = VoxelRenderer()
@@ -138,7 +138,7 @@ class Game:
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_CULL_FACE)
         glEnable(GL_MULTISAMPLE)
-        glClearColor(0.5, 0.7, 1.0, 1.0)
+        glClearColor(0.2, 0.3, 0.3, 1.0)  # Darker background for better contrast
         
     def framebuffer_size_callback(self, window, width, height):
         glViewport(0, 0, width, height)

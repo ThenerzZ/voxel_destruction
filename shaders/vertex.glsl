@@ -4,6 +4,7 @@ layout (location = 1) in vec3 normal;
 layout (location = 2) in vec2 texCoord;
 layout (location = 3) in vec3 instancePosition;
 layout (location = 4) in vec3 instanceColor;
+layout (location = 5) in float faceIndex;
 
 uniform mat4 view;
 uniform mat4 projection;
