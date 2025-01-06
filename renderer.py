@@ -150,11 +150,11 @@ class VoxelRenderer:
             
     def setup_matrices(self):
         self.projection = pyrr.matrix44.create_perspective_projection(
-            70.0, 800.0/600.0, 0.1, 1000.0, dtype=np.float32
+            70.0, 800.0/600.0, 0.1, 2000.0, dtype=np.float32
         )
         self.view = pyrr.matrix44.create_look_at(
-            np.array([5.0, 5.0, 5.0]),
-            np.array([0.0, 0.0, 0.0]),
+            np.array([64.0, 48.0, 64.0]),
+            np.array([64.0 + np.cos(-np.pi/4), 48.0 - 0.5, 64.0 + np.sin(-np.pi/4)]),
             np.array([0.0, 1.0, 0.0]),
             dtype=np.float32
         )
@@ -335,55 +335,175 @@ class VoxelRenderer:
             print(f"Error in render_world: {e}")
             traceback.print_exc()
         
+    def _calculate_frustum_planes(self, view_proj):
+        """Calculate view frustum planes from view-projection matrix"""
+        # Extract planes from view-projection matrix
+        m = view_proj
+        planes = []
+        
+        # Left plane
+        planes.append(np.array([
+            m[0,3] + m[0,0],
+            m[1,3] + m[1,0],
+            m[2,3] + m[2,0],
+            m[3,3] + m[3,0]
+        ]))
+        
+        # Right plane
+        planes.append(np.array([
+            m[0,3] - m[0,0],
+            m[1,3] - m[1,0],
+            m[2,3] - m[2,0],
+            m[3,3] - m[3,0]
+        ]))
+        
+        # Bottom plane
+        planes.append(np.array([
+            m[0,3] + m[0,1],
+            m[1,3] + m[1,1],
+            m[2,3] + m[2,1],
+            m[3,3] + m[3,1]
+        ]))
+        
+        # Top plane
+        planes.append(np.array([
+            m[0,3] - m[0,1],
+            m[1,3] - m[1,1],
+            m[2,3] - m[2,1],
+            m[3,3] - m[3,1]
+        ]))
+        
+        # Near plane
+        planes.append(np.array([
+            m[0,3] + m[0,2],
+            m[1,3] + m[1,2],
+            m[2,3] + m[2,2],
+            m[3,3] + m[3,2]
+        ]))
+        
+        # Far plane
+        planes.append(np.array([
+            m[0,3] - m[0,2],
+            m[1,3] - m[1,2],
+            m[2,3] - m[2,2],
+            m[3,3] - m[3,2]
+        ]))
+        
+        # Normalize planes
+        normalized_planes = []
+        for plane in planes:
+            length = np.sqrt(plane[0] * plane[0] + plane[1] * plane[1] + plane[2] * plane[2])
+            if length > 0:
+                normalized_planes.append(plane / length)
+            else:
+                normalized_planes.append(plane)
+        
+        return normalized_planes
+        
+    def _is_sphere_in_frustum(self, frustum, center, radius):
+        """Check if a sphere is inside or intersects the view frustum"""
+        for plane in frustum:
+            # Calculate signed distance from sphere center to plane
+            distance = (
+                plane[0] * center[0] +
+                plane[1] * center[1] +
+                plane[2] * center[2] +
+                plane[3]
+            )
+            
+            # If sphere is completely behind any plane, it's outside
+            if distance < -radius:
+                return False
+            
+        return True
+        
     def _render_static_voxels(self, world):
         """Render the static (non-moving) voxels in the world"""
         try:
-            print("\nStarting static voxel rendering...")
             # Pre-allocate arrays for better performance
-            max_instances = world.width * world.height * world.depth * 6  # 6 faces per voxel maximum
-            instance_data = np.zeros(max_instances * 6, dtype=np.float32)
+            max_batch_size = 16384  # Limit batch size for better performance
+            instance_data = np.zeros(max_batch_size * 6, dtype=np.float32)
             instance_count = 0
             
-            print(f"Allocated instance data array for {max_instances} instances")
+            # Calculate view frustum for culling
+            view_proj = np.array(self.projection @ self.view)
+            frustum = self._calculate_frustum_planes(view_proj)
             
-            # Render each voxel
-            for x in range(world.width):
-                for y in range(world.height):
-                    for z in range(world.depth):
-                        voxel = world.get_voxel_data(x, y, z)
-                        if voxel and voxel.material_type != MaterialType.AIR:
-                            # Check each face
-                            for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
-                                if self.should_render_face(world, x, y, z, dx, dy, dz):
-                                    # Calculate offset into instance_data array
-                                    offset = instance_count * 6
-                                    
-                                    # Position
-                                    instance_data[offset:offset+3] = [x, y, z]
-                                    
-                                    # Get base color for material
-                                    base_color = self.material_colors[voxel.material_type][:3]
-                                    
-                                    # Apply damage state modifier
-                                    damage_modifier = self.damage_modifiers[voxel.damage_state]
-                                    
-                                    # Final color
-                                    color = base_color * damage_modifier
-                                    instance_data[offset+3:offset+6] = color
-                                    
-                                    instance_count += 1
-                                    
-                                    if instance_count >= self.max_instances:
-                                        print(f"Rendering batch of {instance_count} instances")
-                                        self._render_batch(instance_data[:instance_count * 6], instance_count)
-                                        instance_count = 0
+            # Get camera position for distance culling
+            camera_pos = np.array([self.view[3][0], self.view[3][1], self.view[3][2]])
+            max_render_distance = 300.0  # Increased render distance
             
+            # Chunk-based rendering
+            chunk_size = 16
+            chunks_x = (world.width + chunk_size - 1) // chunk_size
+            chunks_z = (world.depth + chunk_size - 1) // chunk_size
+            
+            for cx in range(chunks_x):
+                for cz in range(chunks_z):
+                    # Calculate chunk bounds
+                    chunk_min_x = cx * chunk_size
+                    chunk_min_z = cz * chunk_size
+                    chunk_max_x = min((cx + 1) * chunk_size, world.width)
+                    chunk_max_z = min((cz + 1) * chunk_size, world.depth)
+                    
+                    # Check if chunk is in view frustum
+                    chunk_center = np.array([
+                        (chunk_min_x + chunk_max_x) * 0.5,
+                        world.height * 0.5,
+                        (chunk_min_z + chunk_max_z) * 0.5
+                    ])
+                    chunk_radius = np.sqrt(chunk_size * chunk_size * 2 + world.height * world.height) * 0.5
+                    
+                    # Skip frustum culling for nearby chunks
+                    chunk_dist = np.linalg.norm(chunk_center - camera_pos)
+                    if chunk_dist > 32.0 and not self._is_sphere_in_frustum(frustum, chunk_center, chunk_radius):
+                        continue
+                    
+                    # Check chunk distance from camera
+                    if chunk_dist > max_render_distance + chunk_radius:
+                        continue
+                    
+                    # Render voxels in this chunk
+                    for x in range(chunk_min_x, chunk_max_x):
+                        for z in range(chunk_min_z, chunk_max_z):
+                            for y in range(world.height):
+                                voxel = world.get_voxel_data(x, y, z)
+                                if voxel and voxel.material_type != MaterialType.AIR:
+                                    # Quick distance check for individual voxels
+                                    voxel_pos = np.array([x, y, z])
+                                    if np.linalg.norm(voxel_pos - camera_pos) > max_render_distance:
+                                        continue
+                                        
+                                    # Check each face
+                                    for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
+                                        if self.should_render_face(world, x, y, z, dx, dy, dz):
+                                            # Calculate offset into instance_data array
+                                            offset = instance_count * 6
+                                            
+                                            # Position
+                                            instance_data[offset:offset+3] = [x, y, z]
+                                            
+                                            # Get base color for material
+                                            base_color = self.material_colors[voxel.material_type][:3]
+                                            
+                                            # Apply damage state modifier
+                                            damage_modifier = self.damage_modifiers[voxel.damage_state]
+                                            
+                                            # Final color
+                                            color = base_color * damage_modifier
+                                            instance_data[offset+3:offset+6] = color
+                                            
+                                            instance_count += 1
+                                            
+                                            # Render batch if full
+                                            if instance_count >= max_batch_size:
+                                                self._render_batch(instance_data, instance_count)
+                                                instance_count = 0
+                
+            # Render remaining instances
             if instance_count > 0:
-                print(f"Rendering final batch of {instance_count} instances")
                 self._render_batch(instance_data[:instance_count * 6], instance_count)
                 
-            print("Static voxel rendering complete")
-            
         except Exception as e:
             print(f"Error in static voxel rendering: {e}")
             traceback.print_exc()
@@ -448,7 +568,10 @@ class VoxelRenderer:
     def _render_batch(self, instance_data, instance_count):
         """Render a batch of instances efficiently"""
         try:
-            print(f"Rendering batch: {instance_count} instances")
+            # Only print batch info occasionally for debugging
+            if instance_count > 100:  # Only print for larger batches
+                print(f"Rendering batch: {instance_count} instances")
+                
             glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
             glBufferSubData(GL_ARRAY_BUFFER, 0, instance_data.nbytes, instance_data)
             
@@ -456,7 +579,9 @@ class VoxelRenderer:
             glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None, instance_count)
             glBindVertexArray(0)
             glBindBuffer(GL_ARRAY_BUFFER, 0)
-            print("Batch rendering complete")
+            
+            if instance_count > 100:  # Only print for larger batches
+                print("Batch rendering complete")
             
         except Exception as e:
             print(f"Error in batch rendering: {e}")

@@ -15,8 +15,8 @@ class Camera:
         self.pitch = 0.0
         
         # Camera settings
-        self.movement_speed = 20.0
-        self.mouse_sensitivity = 0.1
+        self.movement_speed = 50.0  # Faster base movement
+        self.mouse_sensitivity = 0.05  # Lower for more precise control
         
         # Mouse tracking
         self.last_x = 400
@@ -33,6 +33,9 @@ class Camera:
         
         # Sprint state
         self.sprinting = False
+        
+        # Update vectors
+        self.update_camera_vectors()
         
     def get_view_matrix(self):
         return pyrr.matrix44.create_look_at(
