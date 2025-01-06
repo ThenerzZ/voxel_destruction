@@ -6,6 +6,7 @@ import os
 import ctypes
 from lighting import LightingSystem
 from atmosphere import AtmosphereSystem
+from physics import MaterialType
 
 class VoxelRenderer:
     def __init__(self):
@@ -36,6 +37,22 @@ class VoxelRenderer:
         self.setup_matrices()
         self.setup_cube()
         
+        # Material colors
+        self.material_colors = {
+            MaterialType.AIR: np.array([0.0, 0.0, 0.0, 0.0]),  # Transparent
+            MaterialType.CONCRETE: np.array([0.7, 0.7, 0.7]),  # Gray
+            MaterialType.WOOD: np.array([0.6, 0.4, 0.2]),      # Brown
+            MaterialType.GLASS: np.array([0.8, 0.9, 1.0]),     # Light blue
+            MaterialType.METAL: np.array([0.8, 0.8, 0.9]),     # Metallic gray
+        }
+        
+        # Damage state modifiers
+        self.damage_modifiers = [
+            1.0,    # Pristine
+            0.8,    # Slightly damaged
+            0.6,    # Heavily damaged
+        ]
+        
     def should_render_face(self, world, x, y, z, dx, dy, dz):
         """Check if a face should be rendered based on adjacent voxels"""
         # Check if the adjacent block position is valid
@@ -49,8 +66,11 @@ class VoxelRenderer:
                 0 <= adj_z < world.depth):
             return True
         
-        # If adjacent block is air (0), render the face
-        return world.voxels[adj_x, adj_y, adj_z] == 0
+        # Get adjacent voxel data
+        adj_voxel = world.get_voxel_data(adj_x, adj_y, adj_z)
+        
+        # Render face if adjacent block is air or doesn't exist
+        return adj_voxel is None or adj_voxel.material_type == MaterialType.AIR
         
     def setup_shaders(self):
         with open('shaders/vertex.glsl', 'r') as file:
@@ -73,43 +93,43 @@ class VoxelRenderer:
         )
         
     def setup_cube(self):
-        # Define vertices for a unit cube centered at origin
+        # Define vertices for a unit cube (using full 1.0 size)
         vertices = np.array([
             # Front face (+Z)
-            -0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 0.0,  # 0
-             0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 0.0,  # 1
-             0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 1.0,  # 2
-            -0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 1.0,  # 3
+            -0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 0.0,  # Full size cube
+             0.5, -0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 0.0,  # for no gaps
+             0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  1.0, 1.0,
+            -0.5,  0.5,  0.5,  0.0,  0.0,  1.0,  0.0, 1.0,
 
             # Back face (-Z)
-            -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,  # 4
-             0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,  # 5
-             0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,  # 6
-            -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,  # 7
+            -0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 0.0,
+             0.5, -0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 0.0,
+             0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  0.0, 1.0,
+            -0.5,  0.5, -0.5,  0.0,  0.0, -1.0,  1.0, 1.0,
 
             # Top face (+Y)
-            -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0,  # 8
-             0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 1.0,  # 9
-             0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,  # 10
-            -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 0.0,  # 11
+            -0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  0.0, 1.0,
+             0.5,  0.5, -0.5,  0.0,  1.0,  0.0,  1.0, 1.0,
+             0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  1.0, 0.0,
+            -0.5,  0.5,  0.5,  0.0,  1.0,  0.0,  0.0, 0.0,
 
             # Bottom face (-Y)
-            -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 0.0,  # 12
-             0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 0.0,  # 13
-             0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 1.0,  # 14
-            -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 1.0,  # 15
+            -0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  0.0, 0.0,
+             0.5, -0.5, -0.5,  0.0, -1.0,  0.0,  1.0, 0.0,
+             0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  1.0, 1.0,
+            -0.5, -0.5,  0.5,  0.0, -1.0,  0.0,  0.0, 1.0,
 
             # Right face (+X)
-             0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 0.0,  # 16
-             0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 1.0,  # 17
-             0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 1.0,  # 18
-             0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 0.0,  # 19
+             0.5, -0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 0.0,
+             0.5,  0.5, -0.5,  1.0,  0.0,  0.0,  1.0, 1.0,
+             0.5,  0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 1.0,
+             0.5, -0.5,  0.5,  1.0,  0.0,  0.0,  0.0, 0.0,
 
             # Left face (-X)
-            -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 0.0,  # 20
-            -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,  # 21
-            -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 1.0,  # 22
-            -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,  # 23
+            -0.5, -0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 0.0,
+            -0.5,  0.5, -0.5, -1.0,  0.0,  0.0,  0.0, 1.0,
+            -0.5,  0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 1.0,
+            -0.5, -0.5,  0.5, -1.0,  0.0,  0.0,  1.0, 0.0,
         ], dtype=np.float32)
 
         # Define indices for all faces
@@ -204,53 +224,51 @@ class VoxelRenderer:
         glEnable(GL_DEPTH_TEST)
         glDepthFunc(GL_LESS)
         
-        # Disable face culling for now to debug visibility issues
+        # Disable face culling for now to see all faces
         glDisable(GL_CULL_FACE)
         
-        # Clear buffers
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        # Enable blending for transparent materials
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         
         # Update and set uniforms
         self.set_uniforms()
         
         # Pre-allocate arrays for better performance
-        max_faces = world.width * world.height * world.depth * 6  # Maximum possible faces
-        instance_data = np.zeros(max_faces * 6, dtype=np.float32)  # 6 floats per instance
+        max_instances = world.width * world.height * world.depth * 6  # 6 faces per voxel maximum
+        instance_data = np.zeros(max_instances * 6, dtype=np.float32)
         instance_count = 0
         
-        # Face colors for different orientations
-        face_colors = [
-            [1.00, 0.80, 0.80],  # Front  (+Z) - Salmon pink
-            [0.80, 0.80, 1.00],  # Back   (-Z) - Light blue
-            [1.00, 1.00, 1.00],  # Top    (+Y) - White
-            [0.70, 0.70, 0.70],  # Bottom (-Y) - Gray
-            [0.80, 1.00, 0.80],  # Right  (+X) - Light green
-            [1.00, 0.90, 0.80],  # Left   (-X) - Peach
-        ]
-        
-        # Render voxels
+        # Render each voxel
         for x in range(world.width):
             for y in range(world.height):
                 for z in range(world.depth):
-                    if world.voxels[x, y, z] == 1:
+                    voxel = world.get_voxel_data(x, y, z)
+                    if voxel and voxel.material_type != MaterialType.AIR:
                         # Check each face
                         for face_idx, (dx, dy, dz) in enumerate(self.face_directions):
-                            adj_x = x + dx
-                            adj_y = y + dy
-                            adj_z = z + dz
-                            
-                            # Render face if it's at the edge or next to an air block
-                            if (not (0 <= adj_x < world.width and 
-                                   0 <= adj_y < world.height and 
-                                   0 <= adj_z < world.depth) or
-                                world.voxels[adj_x, adj_y, adj_z] == 0):
-                                
+                            if self.should_render_face(world, x, y, z, dx, dy, dz):
                                 # Calculate offset into instance_data array
                                 offset = instance_count * 6
+                                
                                 # Position
                                 instance_data[offset:offset+3] = [x, y, z]
-                                # Color
-                                instance_data[offset+3:offset+6] = face_colors[face_idx]
+                                
+                                # Get base color for material
+                                base_color = self.material_colors[voxel.material_type][:3]  # Only take RGB components
+                                
+                                # Apply damage state modifier
+                                damage_modifier = self.damage_modifiers[voxel.damage_state]
+                                
+                                # Apply deformation effect (darken and add redness for deformed metal/wood)
+                                if voxel.deformation > 0:
+                                    deform_color = np.array([0.8, 0.2, 0.2])  # Reddish tint
+                                    base_color = base_color * (1.0 - voxel.deformation) + deform_color * voxel.deformation
+                                
+                                # Final color
+                                color = base_color * damage_modifier
+                                instance_data[offset+3:offset+6] = color
+                                
                                 instance_count += 1
                                 
                                 if instance_count >= self.max_instances:
@@ -259,19 +277,50 @@ class VoxelRenderer:
         
         if instance_count > 0:
             self._render_batch(instance_data[:instance_count * 6], instance_count)
-        
-        # Cleanup
-        glBindVertexArray(0)
-        glBindBuffer(GL_ARRAY_BUFFER, 0)
-
+            
+        # Render fragments with material-specific appearances
+        if world.physics.fragments:
+            fragment_data = np.zeros(len(world.physics.fragments) * 6, dtype=np.float32)
+            for i, fragment in enumerate(world.physics.fragments):
+                offset = i * 6
+                fragment_data[offset:offset+3] = fragment.position
+                
+                # Get base color for fragment material
+                base_color = self.material_colors[fragment.material_type]
+                
+                # Add some variation based on fragment lifetime
+                intensity = 0.6 + 0.2 * np.sin(fragment.lifetime * 5.0)
+                fragment_data[offset+3:offset+6] = base_color * intensity
+            
+            self._render_batch(fragment_data, len(world.physics.fragments))
+            
     def _render_batch(self, instance_data, instance_count):
-        instance_data = np.array(instance_data, dtype=np.float32)
-        
+        """Render a batch of instances efficiently"""
         glBindBuffer(GL_ARRAY_BUFFER, self.instance_vbo)
         glBufferSubData(GL_ARRAY_BUFFER, 0, instance_data.nbytes, instance_data)
         
         glBindVertexArray(self.vao)
         glDrawElementsInstanced(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None, instance_count)
-        
         glBindVertexArray(0)
-        glBindBuffer(GL_ARRAY_BUFFER, 0) 
+        glBindBuffer(GL_ARRAY_BUFFER, 0)
+        
+    def render_cube(self):
+        """Render a single cube"""
+        glBindVertexArray(self.vao)
+        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None)
+        glBindVertexArray(0)
+        
+    def render_chunk(self, chunk):
+        """Render a chunk of voxels"""
+        glBindVertexArray(self.vao)
+        for x in range(chunk.dimensions[0]):
+            for y in range(chunk.dimensions[1]):
+                for z in range(chunk.dimensions[2]):
+                    if chunk.voxels[x, y, z] == 1:
+                        model = pyrr.matrix44.create_from_translation([x, y, z])
+                        glUniformMatrix4fv(
+                            glGetUniformLocation(self.shader, "model"),
+                            1, GL_FALSE, model
+                        )
+                        glDrawElements(GL_TRIANGLES, 36, GL_UNSIGNED_INT, None)
+        glBindVertexArray(0) 
